@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "kaljax"
+version = "0.1.0"
+description = ""
+authors = ["Daniel O'Hanlon <dpohanlon@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+numpy = "^1.25.2"
+jax = "^0.4.25"
+jaxlib = "^0.4.25"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
