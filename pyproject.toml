@@ -1,5 +1,6 @@
 [tool.poetry]
 name = "kaljax"
+packages = [{ include = "kaljax", from = "." }]
 version = "0.1.0"
 description = ""
 authors = ["Daniel O'Hanlon <dpohanlon@gmail.com>"]
@@ -7,10 +8,16 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.10,<3.13"
 numpy = "^1.25.2"
-jax = "^0.4.25"
-jaxlib = "^0.4.25"
+jax = ">=0.4.38"
+jaxlib = ">=0.4.38"
+equinox = "^0.11.3"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-cov = "^5.0"
 
 
 [build-system]
