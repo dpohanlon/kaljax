@@ -82,3 +82,11 @@ print(ll_batch)
 The Equinox module integrates seamlessly with ``jax.grad`` for optimisation
 and ``jax.vmap`` for efficient parameter sweeps.
 
+## Numpyro example
+
+For probabilistic modelling, ``kaljax`` can be combined with
+[NumPyro](https://num.pyro.ai).  The ``examples/ou_numpyro.py`` script
+demonstrates how to wrap a parametric state‑space model inside a NumPyro
+model and perform Bayesian inference on the dynamics of a coupled
+Ornstein–Uhlenbeck process.
+
