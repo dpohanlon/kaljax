@@ -12,7 +12,6 @@ Example
 
 ```python
 import jax.numpy as jnp
-import equinox as eqx
 
 from kaljax.model import ParametricSSM
 
@@ -31,16 +30,22 @@ model = ParametricSSM(theta=jnp.array(0.9), build_matrices=build)
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Callable
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 
 from .filter import forward
 
 
-class ParametricSSM(eqx.Module):
+# data_fields and meta_fields are only needed in JAX<=0.4.35
+@partial(jax.tree_util.register_dataclass,
+         data_fields=['theta'],
+         meta_fields=['build_matrices'])
+@dataclass
+class ParametricSSM:
     """State space model parametrised by a PyTree.
 
     Parameters
@@ -53,7 +58,7 @@ class ParametricSSM(eqx.Module):
     """
 
     theta: jnp.ndarray
-    build_matrices: Callable[[jnp.ndarray], tuple] = eqx.field(static=True)
+    build_matrices: Callable[[jnp.ndarray], tuple] = field(metadata=dict(static=True))
 
     def __call__(self, y, m0, P0, *, G=None, u=None, mask=None):
         """Run the Kalman filter and return the full result."""
@@ -78,7 +83,7 @@ def vmapped_loglik(model: ParametricSSM, thetas, y, m0, P0, *, G=None, u=None, m
     """
 
     def _loglik(theta):
-        inst = eqx.tree_at(lambda m: m.theta, model, theta)
+        inst = replace(model, theta=theta)
         return inst.loglik(y, m0, P0, G=G, u=u, mask=mask)
 
     return jax.vmap(_loglik)(thetas)
