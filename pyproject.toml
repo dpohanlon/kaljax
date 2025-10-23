@@ -11,7 +11,6 @@ readme = "README.md"
 python = ">=3.10,<3.13"
 numpy = "^1.25.2"
 jax = {version = "0.4.30", extras = ["cpu"]}
-equinox = "0.11.3"
 
 
 [tool.poetry.group.dev.dependencies]

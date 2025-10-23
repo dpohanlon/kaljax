@@ -1,7 +1,7 @@
 # kaljax
 
 JAX-powered Kalman filtering and smoothing with a small parametric
-interface built on top of [Equinox](https://github.com/patrick-kidger/equinox).
+interface.
 
 ## Installation
 
@@ -56,7 +56,6 @@ PyTree to the ``(F, H, Q, R)`` matrices:
 ```python
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 from kaljax.model import ParametricSSM, vmapped_loglik
 
 def build(theta):
@@ -79,7 +78,7 @@ ll_batch = vmapped_loglik(model, thetas, y, m0, P0)
 print(ll_batch)
 ```
 
-The Equinox module integrates seamlessly with ``jax.grad`` for optimisation
+The ParametricSSM module integrates seamlessly with ``jax.grad`` for optimisation
 and ``jax.vmap`` for efficient parameter sweeps.
 
 ## Numpyro example
