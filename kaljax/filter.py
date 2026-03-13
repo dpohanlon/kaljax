@@ -202,6 +202,12 @@ def forward_batched(
     return m_seq, P_seq, ll_seq
 
 
+def _forward_vmappable(y, F, H, Q, R, m0, P0, u, mask, G):
+    return forward(y, F, H, Q, R, m0, P0, G=G, u=u, mask=mask)
+
+
 vfilter = jax.vmap(
-    forward, in_axes=(0, 0, 0, 0, 0, 0, 0), out_axes=0
-)  # y,F,H,Q,R,m0,P0 per batch
+    _forward_vmappable,
+    in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, None),
+    out_axes=0,
+)
