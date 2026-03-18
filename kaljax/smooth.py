@@ -1,10 +1,9 @@
-import random
 from functools import partial
 
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp
-from jax import jit, lax
+from jax import jit, lax, random
 
 from .config import JITTER, eye
 from .types import SmoothResult
@@ -57,9 +56,14 @@ def rts(filtered_means, filtered_covs, F, Q, *, G=None, u=None):
         else:
             m_t, P_t, F_t, Q_t, u_t = inputs
 
-        P_pred_next = F_t @ P_t @ F_t.T + Q_t + JITTER * I
+        P_t = 0.5 * (P_t + P_t.T) + JITTER * I
+        Q_t = 0.5 * (Q_t + Q_t.T)
+
+        P_pred_next = F_t @ P_t @ F_t.T + Q_t
+        P_pred_next = 0.5 * (P_pred_next + P_pred_next.T) + JITTER * I
+
         L = jsp.cholesky(P_pred_next, lower=True)
-        A = F_t @ P_t
+        A = P_t @ F_t.T
         J = jsp.cho_solve((L, True), A.T).T
 
         m_pred_next = F_t @ m_t
@@ -68,6 +72,7 @@ def rts(filtered_means, filtered_covs, F, Q, *, G=None, u=None):
 
         m_s = m_t + J @ (m_next - m_pred_next)
         P_s = P_t + J @ (P_next - P_pred_next) @ J.T
+        P_s = 0.5 * (P_s + P_s.T) + JITTER * I
         return (m_s, P_s), (m_s, P_s)
 
     if G is None:
@@ -157,8 +162,16 @@ def rts_batched(m_filt, P_filt, F, Q, *, G=None, u=None, unroll=1):
         P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t + JIT * I
         L = jnp.linalg.cholesky(P_pred)
 
-        A = F_t @ P_t
-        Y = jax.lax.linalg.triangular_solve(L, A, left_side=True, lower=True)
+        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JIT * I
+        Q_t = 0.5 * (Q_t + jnp.swapaxes(Q_t, -1, -2))
+
+        P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t
+        P_pred = 0.5 * (P_pred + jnp.swapaxes(P_pred, -1, -2)) + JIT * I
+        L = jnp.linalg.cholesky(P_pred)
+
+        A = P_t @ jnp.swapaxes(F_t, -1, -2)
+        B = jnp.swapaxes(A, -1, -2)
+        Y = jax.lax.linalg.triangular_solve(L, B, left_side=True, lower=True)
         X = jax.lax.linalg.triangular_solve(
             L, Y, left_side=True, lower=True, transpose_a=True
         )
@@ -210,7 +223,8 @@ def backward_sample(filtered_means, filtered_covs, F, Q, key, *, G=None, u=None)
 
     keys = random.split(key, T)
 
-    x_last = _sample_gaussian(keys[-1], filtered_means[-1], filtered_covs[-1])
+    P_last = 0.5 * (filtered_covs[-1] + filtered_covs[-1].T) + JITTER * I
+    x_last = _sample_gaussian(keys[-1], filtered_means[-1], P_last)
 
     m_in = jnp.flip(filtered_means[:-1], axis=0)
     P_in = jnp.flip(filtered_covs[:-1], axis=0)
@@ -228,9 +242,14 @@ def backward_sample(filtered_means, filtered_covs, F, Q, key, *, G=None, u=None)
         else:
             m_t, P_t, F_t, Q_t, u_t, key_t = inputs
 
-        P_pred = F_t @ P_t @ F_t.T + Q_t + JITTER * I
+        P_t = 0.5 * (P_t + P_t.T) + JITTER * I
+        Q_t = 0.5 * (Q_t + Q_t.T)
+
+        P_pred = F_t @ P_t @ F_t.T + Q_t
+        P_pred = 0.5 * (P_pred + P_pred.T) + JITTER * I
+
         L = jsp.cholesky(P_pred, lower=True)
-        A = F_t @ P_t
+        A = P_t @ F_t.T
         J = jsp.cho_solve((L, True), A.T).T
 
         m_pred = F_t @ m_t
@@ -239,6 +258,7 @@ def backward_sample(filtered_means, filtered_covs, F, Q, key, *, G=None, u=None)
 
         mean_t = m_t + J @ (x_next - m_pred)
         cov_t = P_t - J @ P_pred @ J.T
+        cov_t = 0.5 * (cov_t + cov_t.T) + JITTER * I
         x_t = _sample_gaussian(key_t, mean_t, cov_t)
         return x_t, x_t
 
@@ -333,8 +353,16 @@ def backward_sample_batched(m_filt, P_filt, F, Q, key, *, G=None, u=None, unroll
         P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t + JITTER * I
         L = jnp.linalg.cholesky(P_pred)
 
-        A = F_t @ P_t
-        Y = jax.lax.linalg.triangular_solve(L, A, left_side=True, lower=True)
+        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JIT * I
+        Q_t = 0.5 * (Q_t + jnp.swapaxes(Q_t, -1, -2))
+
+        P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t
+        P_pred = 0.5 * (P_pred + jnp.swapaxes(P_pred, -1, -2)) + JIT * I
+        L = jnp.linalg.cholesky(P_pred)
+
+        A = P_t @ jnp.swapaxes(F_t, -1, -2)
+        B = jnp.swapaxes(A, -1, -2)
+        Y = jax.lax.linalg.triangular_solve(L, B, left_side=True, lower=True)
         X = jax.lax.linalg.triangular_solve(
             L, Y, left_side=True, lower=True, transpose_a=True
         )
