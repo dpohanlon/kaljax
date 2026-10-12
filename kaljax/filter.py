@@ -1,18 +1,22 @@
 from functools import partial
+
 import jax
-from jax import lax, jit
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp
+from jax import jit, lax
 from jax.lax.linalg import triangular_solve
 
-from .types import FilterResult
 from .config import JITTER, eye
+from .types import FilterResult
+
 
 def _as_seq(A, T):
     return A if A.ndim >= 3 else jnp.broadcast_to(A, (T,) + A.shape)
 
+
 def _as_seq_time(A, T):
     return A if A.ndim >= 4 else jnp.broadcast_to(A, (A.shape[0], T) + A.shape[1:])
+
 
 @partial(jit, static_argnames=("method",))
 def forward(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol"):
@@ -22,9 +26,12 @@ def forward(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol"):
     H_seq = _as_seq(H, T)
     Q_seq = _as_seq(Q, T)
     R_seq = _as_seq(R, T)
+
     if G is not None:
-        G_seq = _as_seq(G, T)
+        if u is None:
+            raise ValueError("u must be provided when G is not None")
         u_seq = _as_seq(u, T)
+
     I = eye(state_dim, dtype=y.dtype)
 
     if mask is None:
@@ -32,8 +39,16 @@ def forward(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol"):
 
     def step(carry, inputs):
         m_prev, P_prev = carry
-        y_t, F_t, H_t, Q_t, R_t, obs_t = inputs
+        if G is None:
+            y_t, F_t, H_t, Q_t, R_t, obs_t = inputs
+            u_t = None
+        else:
+            y_t, F_t, H_t, Q_t, R_t, obs_t, u_t = inputs
+
         m_pred = F_t @ m_prev
+        if G is not None:
+            m_pred = m_pred + G @ u_t
+
         P_pred = F_t @ P_prev @ F_t.T + Q_t + JITTER * I
 
         def do_update(_):
@@ -54,26 +69,26 @@ def forward(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol"):
         def skip_update(_):
             return m_pred, P_pred, jnp.array(0.0, dtype=y.dtype)
 
-        if G is not None:
-            m_pred = m_pred + G_seq[0] @ u_seq[0]  # aligned by scan input; see below
-
         m_upd, P_upd, ll_t = lax.cond(obs_t, do_update, skip_update, operand=None)
         return (m_upd, P_upd), (m_upd, P_upd, ll_t)
 
     if G is None:
         inputs = (y, F_seq, H_seq, Q_seq, R_seq, mask)
     else:
-        # prepend G_t,u_t into y via closure; align with inputs by rotating through scan
-        def pack(y, F_seq, H_seq, Q_seq, R_seq, mask, G_seq, u_seq):
-            return (y, F_seq, H_seq, Q_seq, R_seq, mask, G_seq, u_seq)
-        y, F_seq, H_seq, Q_seq, R_seq, mask, G_seq, u_seq = pack(y, F_seq, H_seq, Q_seq, R_seq, mask, G_seq, u_seq)
-        inputs = (y, F_seq, H_seq, Q_seq, R_seq, mask)
+        inputs = (y, F_seq, H_seq, Q_seq, R_seq, mask, u_seq)
 
-    (mT, PT), (m_seq, P_seq, ll_seq) = lax.scan(step, (m0, P0), inputs)
+    (_, _), (m_seq, P_seq, ll_seq) = lax.scan(step, (m0, P0), inputs)
     return FilterResult(m=m_seq, P=P_seq, ll=ll_seq)
 
-@partial(jit, static_argnames=("method","unroll"))
-def forward_batched(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol", unroll=1):
+
+@partial(jit, static_argnames=("method", "unroll"))
+def forward_batched(
+    y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol", unroll=1
+):
+    """Filter batch-first observations and return time-first arrays.
+
+    Outputs have shapes ``(T, B, S)``, ``(T, B, S, S)`` and ``(T, B)``.
+    """
     B, T, O = y.shape
     S = m0.shape[-1]
     I_S = jnp.eye(S, dtype=y.dtype)
@@ -94,12 +109,41 @@ def forward_batched(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method=
             raise ValueError("bad rank")
         return A
 
+    def to_bt_u(u):
+        if u is None:
+            return None
+        if u.ndim == 1:
+            u = jnp.broadcast_to(u, (B, T) + u.shape)
+        elif u.ndim == 2:
+            if u.shape[0] == B:
+                u = jnp.broadcast_to(u[:, None, :], (B, T, u.shape[-1]))
+            elif u.shape[0] == T:
+                u = jnp.broadcast_to(u[None, :, :], (B, T, u.shape[-1]))
+            else:
+                raise ValueError("bad u shape")
+        elif u.ndim == 3:
+            pass
+        else:
+            raise ValueError("bad u rank")
+        return u
+
     F_bt = to_bt(F, 2)
     Q_bt = to_bt(Q, 2)
     H_bt = to_bt(H, 2)
     R_bt = to_bt(R, 2)
-    G_bt = to_bt(G, 2) if (G is not None) else None
-    u_bt = to_bt(u, 1) if (u is not None) else None
+
+    if G is not None:
+        if u is None:
+            raise ValueError("u must be provided when G is not None")
+        if G.ndim != 2:
+            raise ValueError(
+                "G must be fixed in time with shape (state_dim, control_dim)"
+            )
+        G_b = jnp.broadcast_to(G, (B,) + G.shape)
+        u_bt = to_bt_u(u)
+    else:
+        G_b = None
+        u_bt = None
 
     if mask is None:
         mask_bt = jnp.ones((B, T, O), dtype=bool)
@@ -120,8 +164,9 @@ def forward_batched(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method=
         mskt = mask_bt[:, t].astype(y.dtype)
 
         m_pred = (F_t @ m_prev[..., None])[..., 0]
-        if (G_bt is not None) and (u_bt is not None):
-            m_pred = m_pred + (G_bt[:, t] @ u_bt[:, t][..., None])[..., 0]
+        if G_b is not None:
+            m_pred = m_pred + (G_b @ u_bt[:, t][..., None])[..., 0]
+
         P_pred = F_t @ P_prev @ jnp.swapaxes(F_t, 1, 2) + Q_t + J * I_S
 
         Hm = H_t * mskt[..., :, None]
@@ -136,7 +181,11 @@ def forward_batched(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method=
         x1 = triangular_solve(L, y1, left_side=True, lower=True, transpose_a=True)
         Sinv_v = x1[..., 0]
         log_det_S = 2.0 * jnp.sum(jnp.log(jnp.diagonal(L, axis1=-2, axis2=-1)), axis=-1)
-        ll_t = -0.5 * (log_det_S + jnp.sum(v_eff * Sinv_v, axis=-1) + jnp.sum(mskt, axis=-1) * jnp.log(2.0 * jnp.pi))
+        ll_t = -0.5 * (
+            log_det_S
+            + jnp.sum(v_eff * Sinv_v, axis=-1)
+            + jnp.sum(mskt, axis=-1) * jnp.log(2.0 * jnp.pi)
+        )
 
         PHt = P_pred @ jnp.swapaxes(Hm, 1, 2)
         yK = triangular_solve(L, jnp.swapaxes(PHt, 1, 2), left_side=True, lower=True)
@@ -145,11 +194,29 @@ def forward_batched(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method=
 
         m_upd = m_pred + (K @ v_eff[..., None])[..., 0]
         I_KH = I_S[None, ...] - (K @ Hm)
-        P_upd = I_KH @ P_pred @ jnp.swapaxes(I_KH, 1, 2) + K @ R_eff @ jnp.swapaxes(K, 1, 2)
+        P_upd = I_KH @ P_pred @ jnp.swapaxes(I_KH, 1, 2) + K @ R_eff @ jnp.swapaxes(
+            K, 1, 2
+        )
 
         return (m_upd, P_upd), (m_upd, P_upd, ll_t)
 
-    (mT, PT), (m_seq, P_seq, ll_seq) = lax.scan(step, (m0, P0), jnp.arange(T), unroll=unroll)
+    (_, _), (m_seq, P_seq, ll_seq) = lax.scan(
+        step, (m0, P0), jnp.arange(T), unroll=unroll
+    )
     return m_seq, P_seq, ll_seq
 
-vfilter = jax.vmap(forward, in_axes=(0, 0, 0, 0, 0, 0, 0), out_axes=0)  # y,F,H,Q,R,m0,P0 per batch
+
+def _forward_vmappable(y, F, H, Q, R, m0, P0, u, mask, G):
+    return forward(y, F, H, Q, R, m0, P0, G=G, u=u, mask=mask)
+
+
+_vfilter = jax.vmap(
+    _forward_vmappable,
+    in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, None),
+    out_axes=0,
+)
+
+
+def vfilter(y, F, H, Q, R, m0, P0, u=None, mask=None, G=None):
+    """Vectorise the filter over batch-first inputs with optional controls and masks."""
+    return _vfilter(y, F, H, Q, R, m0, P0, u, mask, G)
