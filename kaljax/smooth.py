@@ -56,7 +56,7 @@ def rts(filtered_means, filtered_covs, F, Q, *, G=None, u=None):
         else:
             m_t, P_t, F_t, Q_t, u_t = inputs
 
-        P_t = 0.5 * (P_t + P_t.T) + JITTER * I
+        P_t = 0.5 * (P_t + P_t.T)
         Q_t = 0.5 * (Q_t + Q_t.T)
 
         P_pred_next = F_t @ P_t @ F_t.T + Q_t
@@ -72,7 +72,7 @@ def rts(filtered_means, filtered_covs, F, Q, *, G=None, u=None):
 
         m_s = m_t + J @ (m_next - m_pred_next)
         P_s = P_t + J @ (P_next - P_pred_next) @ J.T
-        P_s = 0.5 * (P_s + P_s.T) + JITTER * I
+        P_s = 0.5 * (P_s + P_s.T)
         return (m_s, P_s), (m_s, P_s)
 
     if G is None:
@@ -88,6 +88,7 @@ def rts(filtered_means, filtered_covs, F, Q, *, G=None, u=None):
 
 @partial(jit, static_argnames=("unroll",))
 def rts_batched(m_filt, P_filt, F, Q, *, G=None, u=None, unroll=1):
+    """Smooth batch-first filtered means and covariances, returning batch-first arrays."""
     B, T, S = m_filt.shape
     I = jnp.eye(S, dtype=m_filt.dtype)
 
@@ -158,10 +159,7 @@ def rts_batched(m_filt, P_filt, F, Q, *, G=None, u=None, unroll=1):
         else:
             m_t, P_t, F_t, Q_t, u_t = inputs
 
-        P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t + JITTER * I
-        L = jnp.linalg.cholesky(P_pred)
-
-        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JITTER * I
+        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2))
         Q_t = 0.5 * (Q_t + jnp.swapaxes(Q_t, -1, -2))
 
         P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t
@@ -183,6 +181,7 @@ def rts_batched(m_filt, P_filt, F, Q, *, G=None, u=None, unroll=1):
         delta = m_next - m_pred
         m_s = m_t + (Jgain @ delta[..., None])[..., 0]
         P_s = P_t + Jgain @ (P_next - P_pred) @ jnp.swapaxes(Jgain, -1, -2)
+        P_s = 0.5 * (P_s + jnp.swapaxes(P_s, -1, -2))
         return (m_s, P_s), (m_s, P_s)
 
     if G_b is None:

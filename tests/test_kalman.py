@@ -122,6 +122,36 @@ def test_rts_matches_manual():
     np.testing.assert_allclose(smooth_res.P, P_exp, rtol=1e-5, atol=1e-8)
 
 
+def test_vfilter_with_controls_and_mask():
+    B, T = 2, 3
+    F = jnp.broadcast_to(jnp.array([[0.9]]), (B, 1, 1))
+    H = jnp.ones((B, 1, 1))
+    Q = jnp.full((B, 1, 1), 0.1)
+    R = jnp.full((B, 1, 1), 0.2)
+    y = jnp.array([[[1.0], [0.5], [-0.3]], [[-0.2], [0.1], [0.0]]])
+    m0 = jnp.zeros((B, 1))
+    P0 = jnp.ones((B, 1, 1))
+    G = jnp.array([[0.5]])
+    u = jnp.array([[0.2], [-0.1]])
+    mask = jnp.array([[True, False, True], [False, True, True]])
+
+    actual = vfilter(y, F, H, Q, R, m0, P0, u=u, mask=mask, G=G)
+    expected = [
+        forward(y[b], F[b], H[b], Q[b], R[b], m0[b], P0[b],
+                G=G, u=u[b], mask=mask[b])
+        for b in range(B)
+    ]
+
+    assert actual.m.shape == (B, T, 1)
+    for field in ("m", "P", "ll"):
+        np.testing.assert_allclose(
+            getattr(actual, field),
+            jnp.stack([getattr(result, field) for result in expected]),
+            rtol=1e-5, atol=1e-8,
+        )
+    np.testing.assert_array_equal(np.asarray(actual.ll)[~np.asarray(mask)], 0.0)
+
+
 def test_rts_batched_matches_vmap():
     B, T = 2, 3
     F = jnp.array([[1.0]])
@@ -136,13 +166,19 @@ def test_rts_batched_matches_vmap():
     P0 = jnp.broadcast_to(jnp.eye(1), (B, 1, 1))
 
     m_bt, P_bt, _ = forward_batched(y, F, H, Q, R, m0, P0)
+    # The batched filter returns time-first arrays; smoothers take batch-first arrays.
+    m_bt = jnp.swapaxes(m_bt, 0, 1)
+    P_bt = jnp.swapaxes(P_bt, 0, 1)
     m_s_bt, P_s_bt = rts_batched(m_bt, P_bt, F, Q)
 
     F_b = jnp.broadcast_to(F, (B,) + F.shape)
     Q_b = jnp.broadcast_to(Q, (B,) + Q.shape)
-    res_vm = vsmooth(jnp.swapaxes(m_bt, 0, 1), jnp.swapaxes(P_bt, 0, 1), F_b, Q_b)
-    m_s_vm = jnp.swapaxes(res_vm.m, 0, 1)
-    P_s_vm = jnp.swapaxes(res_vm.P, 0, 1)
+    res_vm = vsmooth(m_bt, P_bt, F_b, Q_b)
+    m_s_vm = res_vm.m
+    P_s_vm = res_vm.P
+
+    assert m_s_bt.shape == (B, T, 1)
+    assert P_s_bt.shape == (B, T, 1, 1)
 
     np.testing.assert_allclose(m_s_bt, m_s_vm, rtol=1e-5, atol=1e-8)
     np.testing.assert_allclose(P_s_bt, P_s_vm, rtol=1e-5, atol=1e-8)

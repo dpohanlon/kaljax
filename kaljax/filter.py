@@ -85,6 +85,10 @@ def forward(y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol"):
 def forward_batched(
     y, F, H, Q, R, m0, P0, *, G=None, u=None, mask=None, method="chol", unroll=1
 ):
+    """Filter batch-first observations and return time-first arrays.
+
+    Outputs have shapes ``(T, B, S)``, ``(T, B, S, S)`` and ``(T, B)``.
+    """
     B, T, O = y.shape
     S = m0.shape[-1]
     I_S = jnp.eye(S, dtype=y.dtype)
@@ -206,8 +210,13 @@ def _forward_vmappable(y, F, H, Q, R, m0, P0, u, mask, G):
     return forward(y, F, H, Q, R, m0, P0, G=G, u=u, mask=mask)
 
 
-vfilter = jax.vmap(
+_vfilter = jax.vmap(
     _forward_vmappable,
     in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, None),
     out_axes=0,
 )
+
+
+def vfilter(y, F, H, Q, R, m0, P0, u=None, mask=None, G=None):
+    """Vectorise the filter over batch-first inputs with optional controls and masks."""
+    return _vfilter(y, F, H, Q, R, m0, P0, u, mask, G)
