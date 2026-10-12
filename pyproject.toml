@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "kaljax"
 packages = [{ include = "kaljax", from = "." }]
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["Daniel O'Hanlon <dpohanlon@gmail.com>"]
 license = "MIT"
