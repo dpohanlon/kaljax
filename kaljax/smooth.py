@@ -90,7 +90,6 @@ def rts(filtered_means, filtered_covs, F, Q, *, G=None, u=None):
 def rts_batched(m_filt, P_filt, F, Q, *, G=None, u=None, unroll=1):
     B, T, S = m_filt.shape
     I = jnp.eye(S, dtype=m_filt.dtype)
-    JIT = 1e-6
 
     def to_bt(A, tail_rank):
         if A is None:
@@ -159,14 +158,14 @@ def rts_batched(m_filt, P_filt, F, Q, *, G=None, u=None, unroll=1):
         else:
             m_t, P_t, F_t, Q_t, u_t = inputs
 
-        P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t + JIT * I
+        P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t + JITTER * I
         L = jnp.linalg.cholesky(P_pred)
 
-        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JIT * I
+        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JITTER * I
         Q_t = 0.5 * (Q_t + jnp.swapaxes(Q_t, -1, -2))
 
         P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t
-        P_pred = 0.5 * (P_pred + jnp.swapaxes(P_pred, -1, -2)) + JIT * I
+        P_pred = 0.5 * (P_pred + jnp.swapaxes(P_pred, -1, -2)) + JITTER * I
         L = jnp.linalg.cholesky(P_pred)
 
         A = P_t @ jnp.swapaxes(F_t, -1, -2)
@@ -353,11 +352,11 @@ def backward_sample_batched(m_filt, P_filt, F, Q, key, *, G=None, u=None, unroll
         P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t + JITTER * I
         L = jnp.linalg.cholesky(P_pred)
 
-        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JIT * I
+        P_t = 0.5 * (P_t + jnp.swapaxes(P_t, -1, -2)) + JITTER * I
         Q_t = 0.5 * (Q_t + jnp.swapaxes(Q_t, -1, -2))
 
         P_pred = F_t @ P_t @ jnp.swapaxes(F_t, -1, -2) + Q_t
-        P_pred = 0.5 * (P_pred + jnp.swapaxes(P_pred, -1, -2)) + JIT * I
+        P_pred = 0.5 * (P_pred + jnp.swapaxes(P_pred, -1, -2)) + JITTER * I
         L = jnp.linalg.cholesky(P_pred)
 
         A = P_t @ jnp.swapaxes(F_t, -1, -2)
